@@ -28,6 +28,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Pair;
 
+import org.apache.cordova.PluginResult;
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaArgs;
 import org.apache.cordova.CordovaPlugin;
@@ -158,6 +159,11 @@ public class SecureStorage extends CordovaPlugin {
         switch (action) {
             case "init":
                 result = init(args, callbackContext);
+                break;
+            case "isDeviceSecure":
+                result = true;
+                PluginResult pluginResult = new PluginResult(PluginResult.Status.OK,isDeviceSecure());
+                callbackContext.sendPluginResult(pluginResult);
                 break;
             case "set":
                 result = set(args, callbackContext);

@@ -1,3 +1,4 @@
+cordova.define("cordova-plugin-secure-storage.SecureStorage", function(require, exports, module) {
 var SecureStorage, SecureStorageiOS, SecureStorageAndroid, SecureStorageWindows, SecureStorageBrowser;
 var sjcl_ss = cordova.require('cordova-plugin-secure-storage.sjcl_ss');
 var _AES_PARAM = {
@@ -200,6 +201,21 @@ SecureStorageAndroid.prototype = {
     options: {
         native: true,
         migrateLocalStorage: false
+    },
+
+    isSecure: function (success, error) {
+            try {
+                if (this.options.native) {
+                    this._executeNativeMethod(
+                    success,
+                    error,
+                    'isDeviceSecure',
+                    []
+                );
+                }
+            } catch (e) {
+                error(e);
+            }
     },
 
     get: function (success, error, key) {
@@ -612,3 +628,5 @@ if (!cordova.plugins.SecureStorage) {
 if (typeof module != 'undefined' && module.exports) {
     module.exports = SecureStorage;
 }
+
+});

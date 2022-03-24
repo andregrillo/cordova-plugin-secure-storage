@@ -161,9 +161,14 @@ public class SecureStorage extends CordovaPlugin {
                 result = init(args, callbackContext);
                 break;
             case "isDeviceSecure":
-                result = true;
-                PluginResult pluginResult = new PluginResult(PluginResult.Status.OK,isDeviceSecure());
-                callbackContext.sendPluginResult(pluginResult);
+                result = isDeviceSecure();
+                if (result) {
+                    PluginResult pluginResult = new PluginResult(PluginResult.Status.OK,"The passcode is set");
+                    callbackContext.sendPluginResult(pluginResult);
+                } else {
+                    PluginResult pluginResult = new PluginResult(PluginResult.Status.OK,"The passcode is not set");
+                    callbackContext.sendPluginResult(pluginResult);
+                }
                 break;
             case "set":
                 result = set(args, callbackContext);

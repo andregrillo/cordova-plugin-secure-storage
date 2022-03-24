@@ -1,4 +1,3 @@
-cordova.define("cordova-plugin-secure-storage.SecureStorage", function(require, exports, module) {
 var SecureStorage, SecureStorageiOS, SecureStorageAndroid, SecureStorageWindows, SecureStorageBrowser;
 var sjcl_ss = cordova.require('cordova-plugin-secure-storage.sjcl_ss');
 var _AES_PARAM = {
@@ -633,4 +632,3 @@ if (typeof module != 'undefined' && module.exports) {
     module.exports = SecureStorage;
 }
 
-});

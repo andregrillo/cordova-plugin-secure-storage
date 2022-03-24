@@ -91,6 +91,10 @@ SecureStorageiOS = function (success, error, service) {
 };
 
 SecureStorageiOS.prototype = {
+    isSecure: function (success, error) {
+        success("The passcode is set");
+    },
+    
     get: function (success, error, key) {
         try {
             _executeNativeMethod(success, error, 'get', [this.service, key]);
@@ -206,7 +210,7 @@ SecureStorageAndroid.prototype = {
     isSecure: function (success, error) {
             try {
                 if (this.options.native) {
-                    this._executeNativeMethod(
+                    _executeNativeMethod(
                     success,
                     error,
                     'isDeviceSecure',
@@ -217,7 +221,7 @@ SecureStorageAndroid.prototype = {
                 error(e);
             }
     },
-
+    
     get: function (success, error, key) {
         try {
             if (this.options.native) {

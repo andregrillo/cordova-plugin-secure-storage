@@ -1,636 +1,653 @@
-cordova.define("cordova-plugin-secure-storage.SecureStorage", function(require, exports, module) {
-var SecureStorage, SecureStorageiOS, SecureStorageAndroid, SecureStorageWindows, SecureStorageBrowser;
-var sjcl_ss = cordova.require('cordova-plugin-secure-storage.sjcl_ss');
-var _AES_PARAM = {
-    ks: 256,
-    ts: 128,
-    mode: 'ccm',
-    cipher: 'aes'
-};
+package com.crypho.plugins;
 
-var _checkCallbacks = function (success, error) {
-    if (typeof success != 'function') {
-        throw new Error('SecureStorage failure: success callback parameter must be a function');
-    }
-    if (typeof error != 'function') {
-        throw new Error('SecureStorage failure: error callback parameter must be a function');
-    }
-};
+import java.io.File;
+import java.lang.reflect.Method;
+import java.security.SecureRandom;
+import java.util.Enumeration;
+import java.util.Hashtable;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
-//Taken from undescore.js
-var _isString = function isString(x) {
-    return Object.prototype.toString.call(x) === '[object String]';
-};
+import android.annotation.TargetApi;
+import android.app.admin.DevicePolicyManager;
+import android.content.SharedPreferences;
+import android.content.res.Resources;
+import android.preference.PreferenceManager;
+import android.security.keystore.UserNotAuthenticatedException;
+import android.telecom.Call;
+import android.util.Log;
+import android.util.Base64;
+import android.os.Build;
+import android.app.KeyguardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.util.Pair;
 
-var _checkIsString = function(value){
-    if (!_isString(value)) {
-        throw new Error('Value is not a String');
-    }
-};
+import org.apache.cordova.PluginResult;
+import org.apache.cordova.CallbackContext;
+import org.apache.cordova.CordovaArgs;
+import org.apache.cordova.CordovaPlugin;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.json.JSONArray;
 
-var _merge_options = function (defaults, options){
-    var res = {};
-    var attrname;
+import javax.crypto.IllegalBlockSizeException;
 
-    for (attrname in defaults) {
-        res[attrname] = defaults[attrname];
-    }
-    for (attrname in options) {
-        if (res.hasOwnProperty(attrname)) {
-            res[attrname] = options[attrname];
-        } else {
-            throw new Error('SecureStorage failure: invalid option ' + attrname);
-        }
-    }
+public class SecureStorage extends CordovaPlugin {
+    private final ExecutorService threadPool = Executors.newCachedThreadPool();
+    private static final String TAG = "SecureStorage";
 
-    return res;
-};
+    private static final boolean SUPPORTS_NATIVE_AES = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
+    private static final boolean SUPPORTED = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
 
-/**
- * Helper method to execute Cordova native method
- *
- * @param   {String}    nativeMethodName Method to execute.
- * @param   {Array}     args             Execution arguments.
- * @param   {Function}  success          Called when returning successful result from an action.
- * @param   {Function}  error            Called when returning error result from an action.
- *
- */
-var _executeNativeMethod = function (success, error, nativeMethodName, args) {
-    var fail;
-    // args checking
-    _checkCallbacks(success, error);
+    private static final String MSG_NOT_SUPPORTED = "API 19 (Android 4.4 KitKat) is required. This device is running API " + Build.VERSION.SDK_INT;
+    private static final String MSG_DEVICE_NOT_SECURE = "Device is not secure";
+    private static final String MSG_AUTH_SKIPPED = "Authentication screen skipped";
+    public static final String MIGRATED_FOR_SECURITY = "_SS_MIGRATED_FOR_SECURITY";
 
-    // By convention a failure callback should always receive an instance
-    // of a JavaScript Error object.
-    fail = function(err) {
-        // provide default message if no details passed to callback
-        if (typeof err === 'undefined') {
-            error(new Error('Error occured while executing native method.'));
-        } else {
-            // wrap string to Error instance if necessary
-            error(_isString(err) ? new Error(err) : err);
-        }
-    };
+    private final Hashtable<String, SharedPreferencesHandler> SERVICE_STORAGE = new Hashtable<String, SharedPreferencesHandler>();
 
-    cordova.exec(success, fail, 'SecureStorage', nativeMethodName, args);
-};
+    private IntentRequestQueue intentRequestQueue;
 
-SecureStorageiOS = function (success, error, service) {
-    this.service = service;
-    try {
-        _executeNativeMethod(
-            success,
-            error,
-            'init',
-            [this.service]
-        );
-    } catch (e) {
-        error(e);
-    }
-    return this;
-};
+    @Override
+    protected void pluginInitialize() {
 
-SecureStorageiOS.prototype = {
-    isSecure: function (success, error) {
-        success("The passcode is set");
-    },
-    
-    get: function (success, error, key) {
-        try {
-            _executeNativeMethod(success, error, 'get', [this.service, key]);
-        } catch (e) {
-            error(e);
-        }
-    },
+        super.pluginInitialize();
 
-    set: function (success, error, key, value) {
-        try {
-            _checkIsString(value);
-            _executeNativeMethod(success, error, 'set', [this.service, key, value]);
-        } catch (e) {
-            error(e);
-        }
-    },
+        intentRequestQueue = new IntentRequestQueue(this);
 
-    remove: function (success, error, key) {
-        try {
-            _executeNativeMethod(success, error, 'remove', [this.service, key]);
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    keys: function (success, error) {
-        try {
-            _executeNativeMethod(success, error, 'keys', [this.service]);
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    clear: function (success, error) {
-        try {
-            _executeNativeMethod(success, error, 'clear', [this.service]);
-        } catch (e) {
-            error(e);
-        }
-    }
-};
-
-// SecureStorage for Windows web interface and proxy parameters are the same as on iOS
-// so we don't create own definition for Windows and simply re-use iOS
-SecureStorageWindows = function (success, error, service) {
-    this.service = service;
-    setTimeout(success, 0);
-    return this;
-};
-SecureStorageWindows.prototype = SecureStorageiOS.prototype;
-
-SecureStorageAndroid = function (success, error, service, options) {
-    var self = this;
-    if (options) {
-        this.options = _merge_options(this.options, options);
     }
 
-    this.service = service;
-    try {
-        _executeNativeMethod(
-            function (native_aes_supported) {
-                var checkMigrateToNativeAES;
 
-                checkMigrateToNativeAES = function () {
-                    self.options.native = native_aes_supported && self.options.native;
-                    if (!self.options.native){
-                        success();
-                    } else {
-                        _executeNativeMethod(
-                            function () {
-                                success();
-                            },
-                            function() {
-                                self._migrate_to_native_aes(success);
-                            },
-                            'fetch',
-                            ['_SS_MIGRATED_TO_NATIVE']
-                        );
-                    }
-                };
+    private void securityMigration(CallbackContext callbackContext) throws JSONException {
+        //transfer all existing items to new table
+        Hashtable<Integer, TransitionValue> transitionTable = new Hashtable<Integer, TransitionValue>();
+        Hashtable<String,Boolean> RSAMap= new Hashtable<String, Boolean>();
+        Enumeration<String> services = SERVICE_STORAGE.keys();
+        while(services.hasMoreElements()){
+            String service = services.nextElement();
+            //initializing rsakeymapper
+            RSAMap.put(service, false);
+            SharedPreferencesHandler handler = SERVICE_STORAGE.get(service);
+            Set<String> keys = handler.keys();
 
-                if (self.options.migrateLocalStorage){
-                    self._migrate_to_native_storage(success);
-                } else {
-                    _executeNativeMethod(
-                        function () {
-                            checkMigrateToNativeAES();
-                        },
-                        function() {
-                            self._migrate_to_native_storage(checkMigrateToNativeAES);
-                        },
-                        'fetch',
-                        ['_SS_MIGRATED_TO_NATIVE_STORAGE']
-                    );
+            for(String key : keys){
+                String value = handler.fetch(key);
+                ExecutorResult result = decryptHelper(value, service,callbackContext);
+
+                if(result.type != ExecutorResultType.ERROR){
+                    TransitionValue t = new TransitionValue(service, key, result.result);
+                    SecureRandom i = new SecureRandom();
+                    transitionTable.put(i.nextInt(), t);
                 }
-            },
-            error,
-            'init',
-            [this.service]
-        );
-    } catch (e) {
-        error(e);
+                else{
+                    callbackContext.error("MIGRATION FAILED : " + result.result);
+                    return;
+                }
+            }
+        }
+
+        //Reinsert data with new keys
+        Enumeration<Integer> transitionKeys = transitionTable.keys();
+        
+        while(transitionKeys.hasMoreElements()){
+            Integer key = transitionKeys.nextElement();
+            TransitionValue tv = transitionTable.get(key);
+
+            //RSA key needs to be created for each service
+            if(!RSAMap.get(tv.getService())){
+                try{
+                    RSA.createKeyPair(getContext(),service2alias(tv.getService()));
+
+                    RSAMap.put(tv.getService(), true);
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            //the encryptor helper already inserts items into storage
+            ExecutorResult result = encrytionHelper(tv.getService(),tv.getKey(), tv.getValue());
+            if(result.type == ExecutorResultType.ERROR){
+                callbackContext.error("MIGRATION FAILED : " + result.result);
+                return;
+            }
+        }
+        
+
+        Context ctx = getContext();
+        SharedPreferences preferences = ctx.getSharedPreferences(ctx.getPackageName() + "_SM", 0);
+        markAsMigrated(preferences);
+        
+
     }
-    return this;
-};
 
-SecureStorageAndroid.prototype = {
-    options: {
-        native: true,
-        migrateLocalStorage: false
-    },
+    private boolean isDeviceSecure() {
+        KeyguardManager keyguardManager = (KeyguardManager) (getContext().getSystemService(Context.KEYGUARD_SERVICE));
+        try {
 
-    isSecure: function (success, error) {
+            // This tries to call isDeviceSecure, which was only added in API 23
+            // The method checks if there is a lock screen that requires authentication defined (not None or Swipe)
+            // This is preferred to the older method isKeyguardSecure, that also returns true if the SIM card is unlocked
+            Method isSecure = null;
+            isSecure = keyguardManager.getClass().getMethod("isDeviceSecure");
+            return ((Boolean) isSecure.invoke(keyguardManager)).booleanValue();
+
+        } catch (Exception e) {
+
+            // Best effort if the preferred method is unavailable
+            return keyguardManager.isKeyguardSecure();
+        }
+    }
+
+    @Override
+    public boolean execute(String action, CordovaArgs args, final CallbackContext callbackContext) throws JSONException {
+
+        if (!SUPPORTED) {
+            Log.w(TAG, MSG_NOT_SUPPORTED);
+            callbackContext.error(MSG_NOT_SUPPORTED);
+            return false;
+        }
+
+        Log.v("ACTION: ", action);
+
+        boolean result = false;
+        switch (action) {
+            case "init":
+                result = init(args, callbackContext);
+                break;
+            case "isDeviceSecure":
+                result = isDeviceSecure();
+                if (result) {
+                    PluginResult pluginResult = new PluginResult(PluginResult.Status.OK,"The passcode is set");
+                    callbackContext.sendPluginResult(pluginResult);
+                } else {
+                    PluginResult pluginResult = new PluginResult(PluginResult.Status.OK,"The passcode is not set");
+                    callbackContext.sendPluginResult(pluginResult);
+                }
+                break;
+            case "set":
+                result = set(args, callbackContext);
+                break;
+            case "get":
+                result = get(args, callbackContext);
+                break;
+            case "decrypt_rsa":
+                result = decrypt_rsa(args, callbackContext);
+                break;
+            case "encrypt_rsa":
+                result = encrypt_rsa(args, callbackContext);
+                break;
+            case "secureDevice":
+                result = secureDevice(callbackContext);
+                break;
+            case "remove":
+                result = remove(args, callbackContext);
+                break;
+            case "store":
+                result = store(args, callbackContext);
+                break;
+            case "fetch":
+                result = fetch(args, callbackContext);
+                break;
+            case "keys":
+                result = keys(args, callbackContext);
+                break;
+            case "clear":
+                result = clear(args, callbackContext);
+        }
+
+
+        return result;
+    }
+
+    // Called when a SecureStorage Javascript object is created
+    // Returns an error if a lock screen that requires authentication is not defined
+    // Creates a private key for an alias based on the name of the store (if it does not exist already)
+    private boolean init(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called init action");
+
+        // Get key alias based on the name of the store
+        String service = args.getString(0);
+        String alias = service2alias(service);
+
+        // Create helper object to manage a SharedPreferences object for the alias
+        SharedPreferencesHandler PREFS = new SharedPreferencesHandler(alias + "_SS", getContext());
+        putStorage(service, PREFS);
+
+        if(checkForSecurityMigration()){
+
             try {
-                if (this.options.native) {
-                    _executeNativeMethod(
-                    success,
-                    error,
-                    'isDeviceSecure',
-                    []
-                );
-                }
-            } catch (e) {
-                error(e);
-            }
-    },
-    
-    get: function (success, error, key) {
-        try {
-            if (this.options.native) {
-                this._native_get(success, error, key);
-            } else {
-                this._sjcl_get(success, error, key);
-            }
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    set: function (success, error, key, value) {
-        try {
-            _checkIsString(value);
-            if (this.options.native) {
-                this._native_set(success, error, key, value);
-            } else {
-                this._sjcl_set(success, error, key, value);
-            }
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    keys: function (success, error) {
-        try {
-            _executeNativeMethod(
-                function (ret) {
-                    var i, len = ret.length, keys = [];
-                    for (i = 0; i < len; ++i) {
-                        if (ret[i] && ret[i].slice(0, 4) === '_SS_') {
-                            keys.push(ret[i].slice(4));
-                        }
-                    }
-                    success(keys);
-                },
-                error,
-                'keys',
-                [this.service]
-            );
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    remove: function (success, error, key) {
-        try {
-            _executeNativeMethod(
-                function () {
-                    success(key);
-                },
-                error,
-                'remove',
-                [this.service, '_SS_' + key]
-            );
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    secureDevice: function (success, error) {
-        try {
-            _executeNativeMethod(
-                success,
-                error,
-                'secureDevice',
-                []
-            );
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    clear: function (success, error) {
-        try {
-            _executeNativeMethod(
-                success,
-                error,
-                'clear',
-                [this.service]
-            );
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    _fetch: function (success, error, key) {
-        _executeNativeMethod(
-            function (value) {
-                success(value);
-            },
-            error,
-            'fetch',
-            [this.service, '_SS_' + key]
-        );
-    },
-
-    _sjcl_get: function (success, error, key) {
-        var payload;
-        var self = this;
-        _executeNativeMethod(
-            function (value) {
-                payload = JSON.parse(value);
-                _executeNativeMethod(
-                    function (AESKey) {
-                        var value, AESKeyBits;
-                        try {
-                            AESKeyBits = sjcl_ss.codec.base64.toBits(AESKey);
-                            value = sjcl_ss.decrypt(AESKeyBits, payload.value);
-                            success(value);
-                        } catch (e) {
-                            error(e);
-                        }
-                    },
-                    error,
-                    'decrypt_rsa',
-                    [self.service, payload.key]
-                );
-            },
-            error,
-            'fetch',
-            [this.service, '_SS_' + key]
-        );
-    },
-
-    _sjcl_set: function (success, error, key, value) {
-        var AESKey, encValue;
-        var self = this;
-
-        AESKey = sjcl_ss.random.randomWords(8);
-        _AES_PARAM.adata = this.service;
-        encValue = sjcl_ss.encrypt(AESKey, value, _AES_PARAM);
-        // Encrypt the AES key
-        _executeNativeMethod(
-            function (encKey) {
-                _executeNativeMethod(
-                    function () {
-                        success(key);
-                    },
-                    error,
-                    'store',
-                    [self.service, '_SS_' + key, JSON.stringify({key: encKey, value: encValue})]
-                );
-            },
-            error,
-            'encrypt_rsa',
-            [this.service, sjcl_ss.codec.base64.fromBits(AESKey)]
-        );
-    },
-
-    _native_get: function (success, error, key) {
-        _executeNativeMethod(
-            success,
-            error,
-            'get',
-            [this.service, '_SS_' + key]
-        );
-    },
-
-    _native_set: function (success, error, key, value) {
-        _executeNativeMethod(
-            function () {
-                success(key);
-            },
-            error,
-            'set',
-            [this.service, '_SS_' + key, value]
-        );
-    },
-
-    _migrate_to_native_storage: function (success) {
-        var key;
-        var secureStorageData = [];
-        var entriesCnt = 0;
-        var entriesProcessed = 0;
-        var entryMigrated;
-        var migrated;
-        var migrateEntry;
-        var self = this;
-
-        migrated = function () {
-            _executeNativeMethod(
-                function () {
-                    success();
-                },
-                function () {
-                },
-                'store',
-                [self.service, '_SS_MIGRATED_TO_NATIVE_STORAGE', '1']
-            );
-        };
-
-        entryMigrated = function () {
-            entriesProcessed++;
-            if (entriesProcessed === entriesCnt) {
-                migrated();
-            }
-        };
-
-        migrateEntry = function (key, value) {
-            _executeNativeMethod(
-                function () {
-                    localStorage.removeItem(key);
-                    entryMigrated();
-                },
-                function () {
-                },
-                'store',
-                [self.service, key, value]
-            );
-        };
-
-        for (key in localStorage) {
-            if (localStorage.hasOwnProperty(key) && key.indexOf('_SS_') === 0) {
-                entriesCnt++;
-                secureStorageData[key] = localStorage.getItem(key);
+                securityMigration(callbackContext);
+            } catch (JSONException e) {
+                e.printStackTrace();
             }
         }
-        if (entriesCnt === 0) {
-            migrated();
+
+
+        if (!isDeviceSecure()) {
+            // Lock screen that requires authentication is not defined
+            Log.e(TAG, MSG_DEVICE_NOT_SECURE);
+            callbackContext.error(MSG_DEVICE_NOT_SECURE);
+
+        } else if (!RSA.isEntryAvailable(alias)) {
+            // Key for alias does not exist
+            handleLockScreen(IntentRequestType.INIT, service, callbackContext);
+
         } else {
-            for (key in secureStorageData) {
-                if (secureStorageData.hasOwnProperty(key)) {
-                    migrateEntry(key, secureStorageData[key]);
-                }
+            // No actions are required to init correctly
+            initSuccess(callbackContext);
+        }
+        return true;
+    }
+
+    private boolean checkForSecurityMigration() {
+        Context ctx = getContext();
+        SharedPreferences preferences = ctx.getSharedPreferences(ctx.getPackageName() + "_SM",0);
+        String isMigrated = preferences.getString(MIGRATED_FOR_SECURITY, "");
+        //check OS then check if keys exist and migration was done
+        if(Build.VERSION.SDK_INT > Build.VERSION_CODES.M){
+
+            int size = initializePreferences();
+            if(isMigrated.equals("TRUE")){
+                return false;
+            }
+            //the target case of migration
+            else if(size > 0){
+                return true;
+            }
+            //new use, meaning we should put the tag in as to not trigger a unwanted migration
+            else{
+                markAsMigrated(preferences);
+                return false;
             }
         }
-    },
+        else{
+            //nothing to do return false
+            return false;
+        }
+    }
 
-    _migrate_to_native_aes: function (success) {
-        var self = this;
-        var keysCnt, keysProcessed;
-        var keyProcessed;
-        var migrated;
-        var migrateKey;
-        var i;
-        var self = this;
+    private void markAsMigrated(SharedPreferences preferences) {
 
-        migrated = function () {
-            _executeNativeMethod(
-                function () {
-                    success();
-                },
-                function () {
-                },
-                'store',
-                [self.service, '_SS_MIGRATED_TO_NATIVE', '1']
-            );
-        };
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(MIGRATED_FOR_SECURITY, "TRUE");
+        editor.commit();
+    }
 
-        keyProcessed = function () {
-            keysProcessed++;
-            if (keysProcessed === keysCnt) {
-                migrated();
+   private int initializePreferences() {
+
+        Context ctx = getContext();
+        File prefdir = new File(ctx.getApplicationInfo().dataDir,"shared_prefs");
+        String[] filenames = prefdir.list();
+        int i = 0;
+        for(String name : filenames){
+            String packageName = ctx.getPackageName();
+            if(name.startsWith(ctx.getPackageName()) && name.endsWith("_SS.xml")){
+                String alias = name.substring(0, name.length() - 4);
+                String service = alias.substring(ctx.getPackageName().length() + 1, alias.length() -3);
+
+                SharedPreferencesHandler PREFS = new SharedPreferencesHandler(alias, getContext());
+                putStorage(service, PREFS);
+                i+=1;
+
+
             }
-        };
+        }
+        return i;
+    }
 
-        migrateKey = function (key) {
-            var payload;
-            _executeNativeMethod(
-                function (value) {
-                    payload = JSON.parse(value);
-                    if (!payload.native) {
-                        self._sjcl_get(
-                            function (value) {
-                                self._native_set(
-                                    function () {
-                                        keyProcessed();
-                                    },
-                                    function () {},
-                                    key.replace('_SS_', ''),
-                                    value
-                                );
-                            },
-                            function () {},
-                            key.replace('_SS_', '')
-                        );
-                    } else {
-                        keyProcessed();
-                    }
-                },
-                function () {
-                },
-                'fetch',
-                [self.service, key]
-            );
-        };
+    // Store a key/enc-value pair in SharedPreferences
+    // The encryption uses the key with an alias associated with the store name
+    private boolean set(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called set action");
+        final String service = args.getString(0);
+        final String key = args.getString(1);
+        final String value = args.getString(2);
 
-        _executeNativeMethod(
-            function (keys) {
-                keysProcessed = 0;
-                keysCnt = keys.length;
-                if (keysCnt === 0) {
-                    migrated();
+        ExecutorResult result = encrytionHelper(service, key, value);
+
+        if(result.type != ExecutorResultType.ERROR){
+            callbackContext.success();
+        }
+        else{
+            callbackContext.error(result.result);
+        }
+        return true;
+
+    }
+
+    private ExecutorResult encrytionHelper(String service, String key, String value) {
+
+        ExecutorResult result;
+
+        EncryptionExecutor encryptionExecutor = new EncryptionExecutor(service, key, value, cordova.getContext());
+        Future<ExecutorResult> exec = cordova.getThreadPool().submit(encryptionExecutor);
+
+        try{
+            result = exec.get();
+            if(result.type == ExecutorResultType.SUCCESS){
+                getStorage(service).store(key, result.result);
+            }
+        } catch (InterruptedException e) {
+            result = new ExecutorResult(ExecutorResultType.ERROR,e.getMessage());
+        } catch (ExecutionException e) {
+            result = new ExecutorResult(ExecutorResultType.ERROR,e.getMessage());
+        }
+        return result;
+
+    }
+
+    // Get the enc-value associated with a key in SharedPreferences
+    // The decryption uses the key with an alias associated with the store name
+    private boolean get(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called get action");
+        final String service = args.getString(0);
+        final String key = args.getString(1);
+        String value = getStorage(service).fetch(key);
+        if (value != null) {
+            ExecutorResult result = decryptHelper(value, service, callbackContext);
+
+            if (result.type != ExecutorResultType.ERROR) {
+                callbackContext.success(result.result);
+            }else {
+                callbackContext.error(result.result);
+            }
+        } else {
+            callbackContext.error("Key [" + key + "] not found.");
+        }
+        return true;
+    }
+
+
+    private ExecutorResult decryptHelper(String value, String service, CallbackContext callbackContext) throws JSONException {
+        JSONObject json = new JSONObject(value);
+        final byte[] encKey = Base64.decode(json.getString("key"), Base64.DEFAULT);
+        JSONObject data = json.getJSONObject("value");
+        final byte[] ct = Base64.decode(data.getString("ct"), Base64.DEFAULT);
+        final byte[] iv = Base64.decode(data.getString("iv"), Base64.DEFAULT);
+        final byte[] adata = Base64.decode(data.getString("adata"), Base64.DEFAULT);
+
+
+
+        DecryptionExecutor decryptionExecutor = new DecryptionExecutor(encKey, service2alias(service), iv, ct, adata);
+        Future<ExecutorResult> decryptThread = cordova.getThreadPool().submit(decryptionExecutor);
+
+        //thread blocks here until result
+        ExecutorResult decrypted;
+        try {
+            decrypted = decryptThread.get();
+        } catch (InterruptedException e) {
+            decrypted = new ExecutorResult(ExecutorResultType.ERROR, e.getMessage());
+        } catch (ExecutionException e) {
+            decrypted = new ExecutorResult(ExecutorResultType.ERROR, e.getMessage());
+        }
+
+        return decrypted;
+
+    }
+
+    // Decrypt a message using the key with an alias associated with the store name
+    private boolean decrypt_rsa(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called decrypt_rsa action");
+        final String service = args.getString(0);
+        // getArrayBuffer does base64 decoding
+        final byte[] decryptMe = args.getArrayBuffer(1);
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                try {
+                    byte[] decrypted = RSA.decrypt(decryptMe, service2alias(service));
+                    callbackContext.success(new String(decrypted));
+                } catch (Exception e) {
+                    Log.e(TAG, "Decrypt (RSA) failed :", e);
+                    callbackContext.error(e.getMessage());
+                }
+            }
+        });
+        return true;
+    }
+
+    // Encrypt a message using the key with an alias associated with the store name
+    private boolean encrypt_rsa(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called encrypt_rsa action");
+        final String service = args.getString(0);
+        final String encryptMe = args.getString(1);
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                try {
+                    byte[] encrypted = RSA.encrypt(encryptMe.getBytes(), service2alias(service));
+                    callbackContext.success(Base64.encodeToString(encrypted, Base64.DEFAULT));
+                } catch (Exception e) {
+                    Log.e(TAG, "Encrypt (RSA) failed :", e);
+                    callbackContext.error(e.getMessage());
+                }
+            }
+        });
+        return true;
+    }
+
+    // Check if there is a lock screen that requires authentication defined
+    // It gives the user the possibility of defining one if there isn't one
+    // Used by the Ciphered Local Storage Plugin at startup
+    private boolean secureDevice(CallbackContext callbackContext) {
+        Log.v(TAG, "Called secureDevice action");
+        handleLockScreen(IntentRequestType.SECURE_DEVICE, null, callbackContext);
+        return true;
+    }
+
+    // The remaining actions are the SharedPreferences interface
+    private boolean remove(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called remove action");
+        String service = args.getString(0);
+        String key = args.getString(1);
+        getStorage(service).remove(key);
+        callbackContext.success();
+        return true;
+    }
+
+    private boolean store(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called store action");
+        String service = args.getString(0);
+        String key = args.getString(1);
+        String value = args.getString(2);
+        getStorage(service).store(key, value);
+        callbackContext.success();
+        return true;
+    }
+
+    private boolean fetch(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called fetch action");
+        String service = args.getString(0);
+        String key = args.getString(1);
+        String value = getStorage(service).fetch(key);
+        if (value != null) {
+            callbackContext.success(value);
+        } else {
+            callbackContext.error("Key [" + key + "] not found.");
+        }
+        return true;
+    }
+
+    private boolean keys(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called keys action");
+        String service = args.getString(0);
+        callbackContext.success(new JSONArray(getStorage(service).keys()));
+        return true;
+    }
+
+    private boolean clear(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+        Log.v(TAG, "Called clear action");
+        String service = args.getString(0);
+        getStorage(service).clear();
+        callbackContext.success();
+        return true;
+    }
+
+    private String service2alias(String service) {
+        return getContext().getPackageName() + "." + service;
+    }
+
+    private SharedPreferencesHandler getStorage(String service) {
+        synchronized (SERVICE_STORAGE) {
+            return SERVICE_STORAGE.get(service);
+        }
+    }
+
+    private void putStorage(String service, SharedPreferencesHandler handler) {
+        synchronized (SERVICE_STORAGE) {
+            SERVICE_STORAGE.put(service, handler);
+        }
+    }
+
+    private void initSuccess(CallbackContext context) {
+        // 0 is falsy in js while 1 is truthy
+        context.success(SUPPORTS_NATIVE_AES ? 1 : 0);
+    }
+
+    private void handleLockScreen(final IntentRequestType type, final String service, final CallbackContext callbackContext) {
+        cordova.getActivity().runOnUiThread(new Runnable() {
+            public void run() {
+                Log.v(TAG, "Handling lock screen");
+
+                // fix applied in context of RMET-1182
+                if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+                    handleLockScreenUsingNoOpOrSetNewPasswordIntent(type, service, callbackContext);
                 } else {
-                    for (i = 0; i < keysCnt; i++) {
-                        migrateKey(keys[i]);
+                    handleLockScreenUsingUnlockIntent(type, service, callbackContext);
+                }
+            }
+        });
+    }
+
+    // Made in context of RNMT-3255, RNMT-3540 and RNMT-3803
+    private void handleLockScreenUsingNoOpOrSetNewPasswordIntent(IntentRequestType type, String service, CallbackContext callbackContext) {
+        Log.v(TAG, "Handling lock screen via KeyguardManager or ACTION_SET_NEW_PASSWORD intent (Android 6 or newer)");
+
+        if (isDeviceSecure()) {
+            Log.v(TAG, "Unlocking Android devices above 6 using KeyguardManager");
+            KeyguardManager keyguardManager = (KeyguardManager) (getContext().getSystemService(Context.KEYGUARD_SERVICE));
+            Intent intent = keyguardManager.createConfirmDeviceCredentialIntent(null, null);
+            // Lock screen is already defined, unlock it via KeyguardManager
+            intentRequestQueue.queueRequest(type, service, intent, callbackContext);
+
+        } else {
+            Log.v(TAG, "Lock screen is not defined, requesting one via ACTION_SET_NEW_PASSWORD intent");
+
+            // Lock screen is not defined, so we request a new one
+            Intent intent = new Intent(DevicePolicyManager.ACTION_SET_NEW_PASSWORD);
+            intentRequestQueue.queueRequest(type, service, intent, callbackContext);
+        }
+    }
+
+    private void handleLockScreenUsingUnlockIntent(IntentRequestType type, String service, CallbackContext callbackContext) {
+        Log.v(TAG, "Handling lock screen via UNLOCK intent (Android 6 or earlier)");
+
+        // Requests a new lock screen or requests to unlock if required
+        Intent intent = new Intent("com.android.credentials.UNLOCK");
+        intentRequestQueue.queueRequest(type, service, intent, callbackContext);
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent intent) {
+        Log.v(TAG, "Activity started by intent has finished");
+
+        super.onActivityResult(requestCode, resultCode, intent);
+
+        IntentRequest request = intentRequestQueue.notifyActivityResultCalled();
+
+        String service = request.getService();
+        CallbackContext callbackContext = request.getCallbackContext();
+
+        // when the user clicks in the back button, the resultCode is 0
+        // when the user authenticate correctly, the resultCode is -1
+        IntentRequestType type = request.getType();
+        if (resultCode == 0) {
+            type = IntentRequestType.AUTHENTICATION_SKIPPED;
+        }
+
+        handleCompletedRequest(type, service, callbackContext);
+    }
+
+    private void handleCompletedRequest(IntentRequestType type, String service, CallbackContext callbackContext) {
+        Log.v(TAG, "Request has completed (maybe from an intent)");
+
+        switch (type) {
+
+            case INIT:
+                handleCompletedInit(service, callbackContext);
+                break;
+
+            case SECURE_DEVICE:
+                handleCompletedSecureDevice(callbackContext);
+                break;
+
+            case AUTHENTICATION_SKIPPED:
+                handleAuthenticationSkipped(callbackContext);
+                break;
+
+            default:
+                Log.w(TAG, "Request completion was not handled");
+                break;
+        }
+    }
+
+
+
+    private void handleCompletedInit(final String service, final CallbackContext callbackContext) {
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                try {
+
+                    // RSA already has mutual exclusion in all its public methods individually
+                    // But this block requires mutual exclusion as a whole
+                    synchronized (SecureStorage.this) {
+                        Log.v(TAG, "Completed request is of init action");
+
+                        String alias = service2alias(service);
+                        if (!RSA.isEntryAvailable(alias)) {
+                            //Solves Issue #96. The RSA key may have been deleted by changing the lock type.
+                            getStorage(service).clear();
+                            RSA.createKeyPair(getContext(), alias);
+                        }
                     }
+
+                    Log.v(TAG, "init returned success");
+                    initSuccess(callbackContext);
+
+                } catch (Exception e) {
+                    Log.e(TAG, "Init returned error because: ", e);
+                    callbackContext.error(e.getMessage());
                 }
-            },
-            function () {
-            },
-            'keys',
-            [self.service]
-        );
+            }
+        });
     }
-};
 
-SecureStorageBrowser = function (success, error, service) {
-    this.service = service;
-    setTimeout(success, 0);
-    return this;
-};
+    private void handleAuthenticationSkipped(CallbackContext callbackContext) {
+        Log.v(TAG, "Completed request with error if the user skipp the Authentication screen");
+        callbackContext.error(MSG_AUTH_SKIPPED);
+    }
 
-SecureStorageBrowser.prototype = {
+    private void handleCompletedSecureDevice(CallbackContext callbackContext) {
+        Log.v(TAG, "Completed request is of secureDevice action");
 
-    get: function (success, error, key) {
-        var value;
-        try {
-            _checkCallbacks(success, error);
-            value = localStorage.getItem('_SS_' + key);
-            if (!value) {
-                error(new Error('Key "' + key + '" not found.'));
-            } else {
-                success(value);
-            }
-        } catch (e) {
-            error(e);
-        }
-    },
+        if (isDeviceSecure()) {
+            Log.v(TAG, "secureDevice returned success");
+            callbackContext.success();
 
-    set: function (success, error, key, value) {
-        try {
-            _checkIsString(value);
-            _checkCallbacks(success, error);
-            localStorage.setItem('_SS_' + key, value);
-            success(key);
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    remove: function (success, error, key) {
-        localStorage.removeItem('_SS_' + key);
-        success(key);
-    },
-
-    keys: function (success, error) {
-        var i, len, key, keys = [];
-        try {
-            _checkCallbacks(success, error);
-            for (i = 0, len = localStorage.length; i < len; ++i) {
-                key = localStorage.key(i);
-                if ('_SS_' === key.slice(0, 4)) {
-                    keys.push(key.slice(4));
-                }
-            }
-            success(keys);
-        } catch (e) {
-            error(e);
-        }
-    },
-
-    clear: function (success, error) {
-        var i, key;
-        try {
-            _checkCallbacks(success, error);
-            i = localStorage.length;
-            while (i-- > 0) {
-                key = localStorage.key(i);
-                if (key && '_SS_' === key.slice(0, 4)) {
-                    localStorage.removeItem(key);
-                }
-            }
-            success();
-        } catch (e) {
-            error(e);
+        } else {
+            Log.v(TAG, "secureDevice returned error");
+            callbackContext.error(MSG_DEVICE_NOT_SECURE);
         }
     }
-};
 
-switch (cordova.platformId) {
-case 'ios':
-    SecureStorage = SecureStorageiOS;
-    break;
-case 'android':
-    SecureStorage = SecureStorageAndroid;
-    break;
-case 'windows':
-    SecureStorage = SecureStorageWindows;
-    break;
-case 'browser':
-    SecureStorage = SecureStorageBrowser;
-    break;
-default:
-    SecureStorage = null;
+
+    private Context getContext() {
+        return cordova.getActivity().getApplicationContext();
+    }
+
+   
 }
-
-if (!cordova.plugins) {
-    cordova.plugins = {};
-}
-
-if (!cordova.plugins.SecureStorage) {
-    cordova.plugins.SecureStorage = SecureStorage;
-}
-
-if (typeof module != 'undefined' && module.exports) {
-    module.exports = SecureStorage;
-}
-
-});
